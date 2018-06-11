@@ -1,0 +1,3 @@
+[submodule "CRC"]
+	path = CRC
+	url = git@gitlab.centralnic.com:centralnic/crc.git
