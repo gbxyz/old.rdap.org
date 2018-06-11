@@ -9,8 +9,6 @@ require(dirname(__DIR__).'/CRC/CRC.php');
 $HTTP = new CRC_HTTP;
 $UA = new CRC_HTTPClient;
 
-$HANDLER = new CRC_ErrorHandler(NULL, 'gavin@tau.uk.com', 'localhost');
-
 // Allow cross-origin requests:
 $HTTP->header('Access-Control-Allow-Origin', '*');
 
