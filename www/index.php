@@ -22,7 +22,7 @@ if ('/' == $path) {
 } else {
 	$parts = preg_split('/\//', $path, 2, PREG_SPLIT_NO_EMPTY);
 	if (2 != count($parts)) {
-		$HTTP->status(400, 'Bad Request, queries must take the form /<type>/<handle>');
+		$HTTP->status(400, 'Bad Request: queries must take the form /<type>/<handle>');
 
 	} else {
 		// extract object type and object handle from the path
@@ -30,7 +30,7 @@ if ('/' == $path) {
 
 		if (!in_array($type, array('domain', 'ip', 'autnum'))) {
 			// unknown object type
-			$HTTP->status(400, sprintf("Bad Request, unsupported object type '%s'", $type));
+			$HTTP->status(400, sprintf("Bad Request: unsupported object type '%s'", $type));
 
 		} else {
 			if ('domain' == $type) {
@@ -39,10 +39,10 @@ if ('/' == $path) {
 			} elseif ('ip' == $type) {
 				// turn $object into a CRC_IP object
 				try {
-					$object = CRC_IP::fromString($object);
+					$object = CRC_IP::fromString($object, (strpos($object, '/') ? CRC_IP::CONVERT_TONETWORK : CRC_IP::CONVERT_TOADDRESS));
 
 				} catch (Exception $e) {
-					$HTTP->status(400, 'Invalid format for IP query');
+					$HTTP->status(400, 'Bad Request: invalid format for IP query');
 
 				}
 
