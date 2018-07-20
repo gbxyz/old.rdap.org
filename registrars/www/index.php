@@ -13,7 +13,7 @@ $UA = new CRC_HTTPClient;
 $HTTP->header('Access-Control-Allow-Origin', '*');
 
 // we don't have PATH_INFO so remove any query string from REQUEST_URI:
-$path = preg_replace('/\?.*$/', '', $_SERVER['REQUEST_URI']);
+$path = lc(preg_replace('/\?.*$/', '', $_SERVER['REQUEST_URI']));
 
 if ('/' == $path) {
 	$HTTP->status(301, 'Moved Permanently');
