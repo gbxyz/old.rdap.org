@@ -9,6 +9,14 @@ require(dirname(__DIR__).'/CRC/CRC.php');
 $HTTP = new CRC_HTTP;
 $UA = new CRC_HTTPClient;
 
+$bucket = new CRC_MemCacheTokenBucket($_SERVER['SERVER_NAME']);
+
+if ($bucket->check($_SERVER['HTTP_CF_CONNECTING_IP'], 30, 300)) {
+	$HTTP->status(429, 'Rate Limit Exceeded');
+	$HTTP->header('Retry-After', 300);
+	exit;
+}
+
 // Allow cross-origin requests:
 $HTTP->header('Access-Control-Allow-Origin', '*');
 
