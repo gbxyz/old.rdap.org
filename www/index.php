@@ -3,49 +3,74 @@
 // RDAP.org main request handler
 // Copyright 2018 Gavin Brown <gavin.brown@uk.com>
 
+//
 // CRC is a foundation library available from CentralNic:
+//
 require(dirname(__DIR__).'/CRC/CRC.php');
 
-$HTTP = new CRC_HTTP;
-$UA = new CRC_HTTPClient;
+//
+// initialise objects we'll use later
+//
+$HTTP	= new CRC_HTTP;
+$UA	= new CRC_HTTPClient;
+$BUCKET	= new CRC_MemCacheTokenBucket($_SERVER['SERVER_NAME']);
 
-$bucket = new CRC_MemCacheTokenBucket($_SERVER['SERVER_NAME']);
-
-if ($bucket->check($_SERVER['HTTP_CF_CONNECTING_IP'], 30, 300)) {
-	$HTTP->status(429, 'Rate Limit Exceeded');
-	$HTTP->header('Retry-After', 300);
-	exit;
-}
-
+//
 // Allow cross-origin requests:
+//
 $HTTP->header('Access-Control-Allow-Origin', '*');
 
+//
 // we don't have PATH_INFO so remove any query string from REQUEST_URI:
+//
 $path = preg_replace('/\?.*$/', '', $_SERVER['REQUEST_URI']);
 
+//
+// redirect / to about page
+//
 if ('/' == $path) {
 	$HTTP->status(301, 'Moved Permanently');
 	$HTTP->redirect('https://about.rdap.org/');
 
 } else {
+	// validate path
 	$parts = preg_split('/\//', $path, 2, PREG_SPLIT_NO_EMPTY);
 	if (2 != count($parts)) {
 		$HTTP->status(400, 'Bad Request: queries must take the form /<type>/<handle>');
 
 	} else {
+		//
 		// extract object type and object handle from the path
+		//
 		list($type, $object) = $parts;
 
+		//
+		// validate object type
+		//
 		if (!in_array($type, array('domain', 'ip', 'autnum'))) {
-			// unknown object type
 			$HTTP->status(400, sprintf("Bad Request: unsupported object type '%s'", $type));
 
+		//
+		// rate limit check
+		//
+		} elseif ($BUCKET->check($_SERVER['HTTP_CF_CONNECTING_IP'], 30, 300)) {
+			$HTTP->status(429, 'Rate Limit Exceeded');
+			$HTTP->header('Retry-After', 300);
+			exit;
+
 		} else {
+
+			//
+			// determine which bootstrap registry to use
+			//
 			if ('domain' == $type) {
+
 				$url = 'https://data.iana.org/rdap/dns.json';
 
 			} elseif ('ip' == $type) {
+				//
 				// turn $object into a CRC_IP object
+				//
 				try {
 					$object = CRC_IP::fromString($object, (strpos($object, '/') ? CRC_IP::CONVERT_TONETWORK : CRC_IP::CONVERT_TOADDRESS));
 
@@ -57,28 +82,37 @@ if ('/' == $path) {
 				$url = (AF_INET == $object->family() ? 'https://data.iana.org/rdap/ipv4.json' : 'https://data.iana.org/rdap/ipv6.json');
 
 			} elseif ('autnum' == $type) {
+
 				$object = intval($object);
 
 				$url = 'https://data.iana.org/rdap/asn.json';
+
 			}
 
-			$json = $UA->mirror($url);
+			//
+			// refresh registry from IANA - the mirror() function won't send a request to IANA if the local file is still fresh
+			//
+			$json = $UA->mirror($url, 86400);
 			if (PEAR::isError($json)) {
 				$HTTP->status(504, 'Unable to retrieve bootstrap file from IANA');
 
 			} else {
 				$registry = json_decode($json);
 
+				//
 				// scan through each service in the registry, putting any which match into
 				// $matches, along with a corresponding "weight", so they can be sorted
 				// by weight to find the closest-matching service:
+				//
 				$matches = array();
 				foreach ($registry->services as $service) {
 					list($values, $urls) = $service;
 					foreach ($values as $value) {
 						if ('autnum' == $type) {
 							if (intval($value) == $object) {
+								//
 								// exact match, weight is zero
+								//
 								$matches[] = array(0, $urls);
 								break 2;
 
@@ -87,7 +121,9 @@ if ('/' == $path) {
 								$max = intval($numbers[2]);
 
 								if ($object >= $min && $object <= $max) {
+									//
 									// enclosing match, weight is the width of the range
+									//
 									$matches[] = array(($max - $min), $urls);
 								}
 
@@ -95,15 +131,19 @@ if ('/' == $path) {
 
 						} elseif ('ip' == $type) {
 							try {
-								$net = CRC_IP::fromString($value);
+								$net = CRC_IP::fromString($value, CRC_IP::CONVERT_TONETWORK);
 
 								if ($net->equals($object)) {
+									//
 									// exact match, weight is zero
+									//
 									$matches[] = array(0, $urls);
 									break 2;
 
 								} elseif ($net->contains($object)) {
+									//
 									// enclosing match, weight is the length of the suffix
+									//
 									$matches[] = array($net->bits() - $net->getPrefix(), $urls);
 
 								}
@@ -115,12 +155,16 @@ if ('/' == $path) {
 
 						} elseif ('domain' == $type) {
 							if (lc($value) == lc($object)) {
+								//
 								// exact match, weight is zero
+								//
 								$matches[] = array(0, $urls);
 								break 2;
 
 							} elseif (1 == preg_match(sprintf('/\.%s/i', preg_quote($value)), $object)) {
+								//
 								// enclosing match, weight is the length of the value
+								//
 								$matches[] = array(strlen($value), $urls);
 
 							}
@@ -132,12 +176,16 @@ if ('/' == $path) {
 					$HTTP->status(404, sprintf('%s %s not found in IANA boostrap file', $type, $object));
 
 				} else {
+					//
 					// sort matching services by weight, lowest first
+					//
 					usort($matches, 'weighted_sort');
 					$match = array_shift($matches);
 					$urls = $match[1];
 
+					//
 					// prefer HTTPS URLs to other URLs
+					//
 					$https_urls = preg_grep('/^https:/', $urls);
 					if (count($https_urls) > 0) {
 						$base = array_shift($https_urls);
@@ -147,16 +195,32 @@ if ('/' == $path) {
 
 					}
 
+					//
 					// append a slash if there isn't one already
+					//
 					if (1 != preg_match('/\/$/', $base)) $base .= '/';
 
+					//
+					// send redirect
+					//
 					$HTTP->redirect(sprintf('%s%s/%s', $base, $type, $object));
+
+
+					//
+					// and we're done!
+					//
 				}
 			}
 		}
 	}
 }
 
+/**
+* function used to sort values by weight
+* @param array $a array($weight, $value)
+* @param array $b array($weight, $value)
+* @return integer -1, 0 or +1
+*/
 function weighted_sort($a, $b) {
 	if ($a[0] == $b[0]) {
 		return 0;
