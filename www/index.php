@@ -47,7 +47,7 @@ if ('/' == $path) {
 		//
 		// validate object type
 		//
-		if (!in_array($type, array('domain', 'ip', 'autnum'))) {
+		if (!in_array($type, array('domain', 'ip', 'autnum', 'entity'))) {
 			$HTTP->status(400, sprintf("Bad Request: unsupported object type '%s'", $type));
 
 		//
@@ -87,6 +87,13 @@ if ('/' == $path) {
 
 				$url = 'https://data.iana.org/rdap/asn.json';
 
+			} elseif ('entity' == $type) {
+
+				$parts = explode('-', $object);
+				$tag = array_pop($parts);
+
+				$url = 'https://data.iana.org/rdap/object-tags.json';
+
 			}
 
 			//
@@ -106,7 +113,15 @@ if ('/' == $path) {
 				//
 				$matches = array();
 				foreach ($registry->services as $service) {
-					list($values, $urls) = $service;
+					if ('entity' == $type) {
+						// first item in the array is the registrant for some reason
+						list(,$values, $urls) = $service;
+
+					} else {
+						list($values, $urls) = $service;
+
+					}
+
 					foreach ($values as $value) {
 						if ('autnum' == $type) {
 							if (intval($value) == $object) {
@@ -168,6 +183,14 @@ if ('/' == $path) {
 								$matches[] = array(strlen($value), $urls);
 
 							}
+
+						} elseif ('entity' == $type) {
+							if (lc($value) == lc($tag)) {
+								$matches[] = array(0, $urls);
+								break 2;
+
+							}
+
 						}
 					}
 				}
