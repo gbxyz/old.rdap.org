@@ -176,7 +176,7 @@ if ('/' == $path) {
 								$matches[] = array(0, $urls);
 								break 2;
 
-							} elseif (1 == preg_match(sprintf('/\.%s/i', preg_quote($value)), $object)) {
+							} elseif (1 == preg_match(sprintf('/\.%s$/i', preg_quote($value)), $object)) {
 								//
 								// enclosing match, weight is the length of the value
 								//
