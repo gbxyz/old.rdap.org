@@ -16,6 +16,19 @@ $UA	= new CRC_HTTPClient;
 $BUCKET	= new CRC_MemCacheTokenBucket($_SERVER['SERVER_NAME']);
 
 //
+// check bearer token which allows rate limiting bypass
+//
+$TOKENS = explode("\n", trim(file_get_contents(dirname(__DIR__).'/tokens.txt')));
+$HEADERS = apache_request_headers();
+if (isset($HEADERS['authorization']) && 1 == preg_match('/^Bearer (.+)$/', $HEADERS['authorization'], $matches) && in_array($matches[1], $TOKENS)) {
+	$limited = false;
+
+} else {
+	$limited = $BUCKET->check($_SERVER['HTTP_CF_CONNECTING_IP'], 3000, 300);
+
+}
+
+//
 // Allow cross-origin requests:
 //
 $HTTP->header('Access-Control-Allow-Origin', '*');
@@ -53,7 +66,7 @@ if ('/' == $path) {
 		//
 		// rate limit check
 		//
-		} elseif ($BUCKET->check($_SERVER['HTTP_CF_CONNECTING_IP'], 30, 300)) {
+		} elseif ($limited) {
 			$HTTP->status(429, 'Rate Limit Exceeded');
 			$HTTP->header('Retry-After', 300);
 			exit;
