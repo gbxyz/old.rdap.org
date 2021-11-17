@@ -49,7 +49,7 @@ if ('/' == $path) {
 	// validate path
 	$parts = preg_split('/\//', $path, 2, PREG_SPLIT_NO_EMPTY);
 	if (2 != count($parts)) {
-		$HTTP->status(400, 'Bad Request: queries must take the form /<type>/<handle>');
+		rdap_error(400, 'Bad Request: queries must take the form /<type>/<handle>');
 
 	} else {
 		//
@@ -57,27 +57,26 @@ if ('/' == $path) {
 		//
 		list($type, $object) = $parts;
 
-		//
-		// validate object type
-		//
 		if (!in_array($type, array('domain', 'ip', 'autnum', 'entity'))) {
-			$HTTP->status(400, sprintf("Bad Request: unsupported object type '%s'", $type));
+            //
+            // invalid object type
+            //
+			rdap_error(400, sprintf("Bad Request: unsupported object type '%s'", $type));
 
-		//
-		// rate limit check
-		//
 		} elseif ($limited) {
-			$HTTP->status(429, 'Rate Limit Exceeded');
+            //
+            // rate limit exceeded
+            //
 			$HTTP->header('Retry-After', 300);
-			exit;
+			rdap_error(429, 'Rate Limit Exceeded');
 
 		} else {
-
 			//
 			// determine which bootstrap registry to use
 			//
 			if ('domain' == $type) {
-
+				$labels = explode('.', lc($object));
+				$parent = implode('.', array_slice($labels, 1));
 				$url = 'https://data.iana.org/rdap/dns.json';
 
 			} elseif ('ip' == $type) {
@@ -88,25 +87,22 @@ if ('/' == $path) {
 					$object = CRC_IP::fromString($object, (strpos($object, '/') ? CRC_IP::CONVERT_TONETWORK : CRC_IP::CONVERT_TOADDRESS));
 
 				} catch (Exception $e) {
-					$HTTP->status(400, 'Bad Request: invalid format for IP query');
+					rdap_error(400, 'Bad Request: invalid format for IP query');
 
 				}
 
 				$url = (AF_INET == $object->family() ? 'https://data.iana.org/rdap/ipv4.json' : 'https://data.iana.org/rdap/ipv6.json');
 
 			} elseif ('autnum' == $type) {
-
 				$object = intval($object);
 
 				$url = 'https://data.iana.org/rdap/asn.json';
 
 			} elseif ('entity' == $type) {
-
 				$parts = explode('-', $object);
 				$tag = array_pop($parts);
 
 				$url = 'https://data.iana.org/rdap/object-tags.json';
-
 			}
 
 			//
@@ -114,7 +110,7 @@ if ('/' == $path) {
 			//
 			$json = $UA->mirror($url, 86400);
 			if (PEAR::isError($json)) {
-				$HTTP->status(504, 'Unable to retrieve bootstrap file from IANA');
+				rdap_error(504, 'Unable to retrieve bootstrap file from IANA');
 
 			} else {
 				$registry = json_decode($json);
@@ -182,19 +178,9 @@ if ('/' == $path) {
 							}
 
 						} elseif ('domain' == $type) {
-							if (lc($value) == lc($object)) {
-								//
-								// exact match, weight is zero
-								//
+							if (lc($value) == $parent) {
 								$matches[] = array(0, $urls);
 								break 2;
-
-							} elseif (1 == preg_match(sprintf('/\.%s$/i', preg_quote($value)), $object)) {
-								//
-								// enclosing match, weight is the length of the value
-								//
-								$matches[] = array(strlen($value), $urls);
-
 							}
 
 						} elseif ('entity' == $type) {
@@ -209,7 +195,7 @@ if ('/' == $path) {
 				}
 
 				if (count($matches) < 1) {
-					$HTTP->status(404, sprintf('%s %s not found in IANA boostrap file', $type, $object));
+					rdap_error(404, sprintf('%s %s not found in IANA boostrap file', $type, $object));
 
 				} else {
 					//
@@ -237,10 +223,9 @@ if ('/' == $path) {
 					if (1 != preg_match('/\/$/', $base)) $base .= '/';
 
 					//
-					// send redirect
+					// send redirect, preserving any query parameters
 					//
-					$HTTP->redirect(sprintf('%s%s/%s', $base, $type, $object));
-
+					$HTTP->redirect(sprintf('%s%s/%s%s', $base, $type, $object, (empty($_GET) ? '' : '?'.http_build_query($_GET))));
 
 					//
 					// and we're done!
@@ -268,4 +253,38 @@ function weighted_sort($a, $b) {
 		return 1;
 
 	}
+}
+
+/**
+* send an RDAP error back to the client
+* @param int $code HTTP error code (e.g. 400, 404, etc)
+* @param string error message
+*/
+function rdap_error($code, $msg) {
+    global $HTTP;
+    $HTTP->status($code, $msg);
+    $HTTP->header('Content-Type', 'application/rdap+json');
+    echo json_encode([
+        'rdapConformance' => ['rdap_level_0'],
+        'lang' => 'en',
+        'errorCode' => intval($code),
+        'title' => $msg,
+        'notices' => [
+            [
+                'title' => 'Terms of Use',
+                'description' => [
+                    'For more information about this service, please see https://about.rdap.org.',
+                ],
+                'links' => [
+                    [
+                        'rel' => 'about',
+                        'href' => 'https://about.rdap.org',
+                        'title' => 'https://about.rdap.org',
+                        'type' => 'text/html',
+                    ]
+                ]
+            ]
+        ]
+    ]);
+    exit;
 }
