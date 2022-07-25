@@ -24,7 +24,7 @@ $HEADERS = apache_request_headers();
 // use CloudFlare connecting IP, X-Forward-For, or REMOTE_ADDR in order
 $CLIENT_ID = (isset($_SERVER['HTTP_CF_CONNECTING_IP']) ? $_SERVER['HTTP_CF_CONNECTING_IP'] : (isset($_SERVER['HTTP_CF_CONNECTING_IP']) ? $_SERVER['HTTP_X_FORWARDED_FOR'] : $_SERVER['REMOTE_ADDR']));
 
-$CLIENT_AUTHENTICATED = isset($HEADERS['authorization']) && 1 == preg_match('/^Bearer (.+)$/', $HEADERS['authorization'], $matches) && in_array($matches[1], $TOKENS)
+$CLIENT_AUTHENTICATED = isset($HEADERS['authorization']) && 1 == preg_match('/^Bearer (.+)$/', $HEADERS['authorization'], $matches) && in_array($matches[1], $TOKENS);
 if ($CLIENT_AUTHENTICATED) {
     // higher limits for authenticated clients
     $LIMITED = $BUCKET->check($CLIENT_ID, 2400, 300);
