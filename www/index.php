@@ -11,8 +11,6 @@ require(dirname(__DIR__).'/CRC/CRC.php');
 //
 // initialise objects we'll use later
 //
-$HTTP   = new CRC_HTTP;
-$UA     = new CRC_HTTPClient;
 $BUCKET = new CRC_MemCacheTokenBucket($_SERVER['SERVER_NAME']);
 
 //
@@ -37,13 +35,13 @@ if ($CLIENT_AUTHENTICATED) {
 //
 // Allow cross-origin requests:
 //
-$HTTP->header('Access-Control-Allow-Origin', '*');
+header('Access-Control-Allow-Origin: *');
 
 if ($LIMITED) {
     //
     // rate limit exceeded
     //
-    $HTTP->header('Retry-After', 300);
+    header('Retry-After: 300');
     rdap_error(429, 'Rate Limit Exceeded');
 
 } else {
@@ -56,8 +54,8 @@ if ($LIMITED) {
     // redirect / to about page
     //
     if ('/' == $path) {
-        $HTTP->status(301, 'Moved Permanently');
-        $HTTP->redirect('https://about.rdap.org/');
+        http_response_code(301);
+        header('Location: https://about.rdap.org/');
 
     } else {
         // validate path
@@ -115,12 +113,17 @@ if ($LIMITED) {
                 //
                 // refresh registry from IANA - the mirror() function won't send a request to IANA if the local file is still fresh
                 //
-                $json = $UA->mirror($url, 86400);
-                if (PEAR::isError($json)) {
+                $json = mirror($url);
+                if (false === $json) {
                     rdap_error(504, 'Unable to retrieve bootstrap file from IANA');
 
                 } else {
                     $registry = json_decode($json);
+                    if (isset($_GET['gb-debug'])) {
+                        header('content-type: text/plain');
+                        var_export($registry);
+                        exit;
+                    }
 
                     //
                     // scan through each service in the registry, putting any which match into
@@ -186,8 +189,14 @@ if ($LIMITED) {
 
                             } elseif ('domain' == $type) {
                                 if (lc($value) == $parent) {
+                                    // exact match for parent
                                     $matches[] = array(0, $urls);
                                     break 2;
+
+                                } elseif (1 == preg_match(sprintf('/\.%s$/i', preg_quote($value)), $object)) {
+                                    // ancestor match, weight is the length of the ancestor FQDN
+                                    $matches[] = array(strlen($value), $urls);
+
                                 }
 
                             } elseif ('entity' == $type) {
@@ -232,7 +241,7 @@ if ($LIMITED) {
                         //
                         // send redirect, preserving any query parameters
                         //
-                        $HTTP->redirect(sprintf('%s%s/%s%s', $base, $type, $object, (empty($_GET) ? '' : '?'.http_build_query($_GET))));
+                        header(sprintf('Location: %s%s/%s%s', $base, $type, $object, (empty($_GET) ? '' : '?'.http_build_query($_GET))));
 
                         //
                         // and we're done!
@@ -269,9 +278,8 @@ function weighted_sort($a, $b) {
 * @param string error message
 */
 function rdap_error($code, $msg) {
-    global $HTTP;
-    $HTTP->status($code, $msg);
-    $HTTP->header('Content-Type', 'application/rdap+json');
+    http_response_code($code);
+    header('Content-Type: application/rdap+json');
     echo json_encode([
         'rdapConformance' => ['rdap_level_0'],
         'lang' => 'en',
@@ -295,4 +303,60 @@ function rdap_error($code, $msg) {
         ]
     ]);
     exit;
+}
+
+function mirror(string $url, int $ttl=86400) {
+    $ch = curl_init();
+
+    $local = sys_get_temp_dir() . DIRECTORY_SEPARATOR . $_SERVER['SERVER_NAME'].'.'.sha1($url);
+
+    $headers = [
+        'Connection: close',
+    ];
+
+    $cached = file_exists($local);
+
+    if ($cached) {
+        $mtime = filemtime($local);
+
+        if (time() - $mtime < $ttl) {
+            return file_get_contents($local);
+
+        } else {
+            $headers[] = sprintf('If-Modified-Since: %s', gmdate('r', $mtime));
+
+        }
+    }
+
+    curl_setopt($ch, CURLOPT_USERAGENT,         $_SERVER['SERVER_NAME']);
+    curl_setopt($ch, CURLOPT_URL,               $url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER,    true);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION,    true);
+    curl_setopt($ch, CURLOPT_TIMEOUT,           5);
+    curl_setopt($ch, CURLOPT_HTTPHEADER,        $headers);
+
+    $result = curl_exec($ch);
+
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+    curl_close($ch);
+
+    if (304 === $code) {
+        touch($local);
+        return file_get_contents($local);
+
+    } elseif (200 === $code) {
+        file_put_contents($local, $result);
+        return $result;
+
+    } else {
+        if ($cached) {
+            touch($local);
+            return file_get_contents($local);
+
+        } else {
+            return false;
+
+        }
+    }
 }
