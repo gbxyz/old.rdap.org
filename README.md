@@ -1,1 +1,1 @@
-This is the code for the https://rdap.org website (see [about.rdap.org](https://about.rdap.org)). It uses a proprietary module to mirror the IANA bootstrap files and set HTTP status codes and headers.
+This is the old code for the https://rdap.org website (see [about.rdap.org](https://about.rdap.org)). You probably want [rdap-org/rdap.org](https://github.com/rdap-org/rdap.org).
